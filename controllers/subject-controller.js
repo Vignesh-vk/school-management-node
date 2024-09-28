@@ -4,161 +4,135 @@ const Student = require('../models/studentSchema.js');
 
 const subjectCreate = async (req, res) => {
     try {
-        const subjects = req.body.subjects.map((subject) => ({
-            subName: subject.subName,
-            subCode: subject.subCode,
-            sessions: subject.sessions,
+        const subjects = req.body.subjects.map(({ subName, subCode, sessions }) => ({
+            subName,
+            subCode,
+            sessions,
+            sclassName: req.body.sclassName,
+            school: req.body.adminID,
         }));
 
-        const existingSubjectBySubCode = await Subject.findOne({
+        const existingSubject = await Subject.findOne({
             'subjects.subCode': subjects[0].subCode,
             school: req.body.adminID,
         });
 
-        if (existingSubjectBySubCode) {
-            res.send({ message: 'Sorry this subcode must be unique as it already exists' });
-        } else {
-            const newSubjects = subjects.map((subject) => ({
-                ...subject,
-                sclassName: req.body.sclassName,
-                school: req.body.adminID,
-            }));
-
-            const result = await Subject.insertMany(newSubjects);
-            res.send(result);
+        if (existingSubject) {
+            return res.status(400).json({ message: 'Subcode must be unique; it already exists' });
         }
+
+        const result = await Subject.insertMany(subjects);
+        return res.status(201).json(result);
     } catch (err) {
-        res.status(500).json(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
 
 const allSubjects = async (req, res) => {
     try {
-        let subjects = await Subject.find({ school: req.params.id })
-            .populate("sclassName", "sclassName")
-        if (subjects.length > 0) {
-            res.send(subjects)
-        } else {
-            res.send({ message: "No subjects found" });
-        }
+        const subjects = await Subject.find({ school: req.params.id }).populate("sclassName", "sclassName");
+        return res.status(200).json(subjects.length > 0 ? subjects : { message: "No subjects found" });
     } catch (err) {
-        res.status(500).json(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
 
 const classSubjects = async (req, res) => {
     try {
-        let subjects = await Subject.find({ sclassName: req.params.id })
-        if (subjects.length > 0) {
-            res.send(subjects)
-        } else {
-            res.send({ message: "No subjects found" });
-        }
+        const subjects = await Subject.find({ sclassName: req.params.id });
+        return res.status(200).json(subjects.length > 0 ? subjects : { message: "No subjects found" });
     } catch (err) {
-        res.status(500).json(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
 
 const freeSubjectList = async (req, res) => {
     try {
-        let subjects = await Subject.find({ sclassName: req.params.id, teacher: { $exists: false } });
-        if (subjects.length > 0) {
-            res.send(subjects);
-        } else {
-            res.send({ message: "No subjects found" });
-        }
+        const subjects = await Subject.find({ sclassName: req.params.id, teacher: { $exists: false } });
+        return res.status(200).json(subjects.length > 0 ? subjects : { message: "No subjects found" });
     } catch (err) {
-        res.status(500).json(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
 
 const getSubjectDetail = async (req, res) => {
     try {
-        let subject = await Subject.findById(req.params.id);
-        if (subject) {
-            subject = await subject.populate("sclassName", "sclassName")
-            subject = await subject.populate("teacher", "name")
-            res.send(subject);
+        let subject = await Subject.findById(req.params.id).populate("sclassName", "sclassName").populate("teacher", "name");
+        if (!subject) {
+            return res.status(404).json({ message: "No subject found" });
         }
-        else {
-            res.send({ message: "No subject found" });
-        }
+        return res.status(200).json(subject);
     } catch (err) {
-        res.status(500).json(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
     }
-}
+};
 
 const deleteSubject = async (req, res) => {
     try {
         const deletedSubject = await Subject.findByIdAndDelete(req.params.id);
+        if (!deletedSubject) {
+            return res.status(404).json({ message: "Subject not found" });
+        }
 
-        // Set the teachSubject field to null in teachers
-        await Teacher.updateOne(
+        await Teacher.updateMany(
             { teachSubject: deletedSubject._id },
-            { $unset: { teachSubject: "" }, $unset: { teachSubject: null } }
+            { $unset: { teachSubject: "" } }
         );
 
-        // Remove the objects containing the deleted subject from students' examResult array
         await Student.updateMany(
             {},
-            { $pull: { examResult: { subName: deletedSubject._id } } }
+            { $pull: { examResult: { subName: deletedSubject._id }, attendance: { subName: deletedSubject._id } } }
         );
 
-        // Remove the objects containing the deleted subject from students' attendance array
-        await Student.updateMany(
-            {},
-            { $pull: { attendance: { subName: deletedSubject._id } } }
-        );
-
-        res.send(deletedSubject);
+        return res.status(200).json(deletedSubject);
     } catch (error) {
-        res.status(500).json(error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
 
 const deleteSubjects = async (req, res) => {
     try {
         const deletedSubjects = await Subject.deleteMany({ school: req.params.id });
-
-        // Set the teachSubject field to null in teachers
         await Teacher.updateMany(
             { teachSubject: { $in: deletedSubjects.map(subject => subject._id) } },
-            { $unset: { teachSubject: "" }, $unset: { teachSubject: null } }
+            { $unset: { teachSubject: "" } }
         );
-
-        // Set examResult and attendance to null in all students
         await Student.updateMany(
             {},
             { $set: { examResult: null, attendance: null } }
         );
 
-        res.send(deletedSubjects);
+        return res.status(200).json(deletedSubjects);
     } catch (error) {
-        res.status(500).json(error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
 
 const deleteSubjectsByClass = async (req, res) => {
     try {
         const deletedSubjects = await Subject.deleteMany({ sclassName: req.params.id });
-
-        // Set the teachSubject field to null in teachers
         await Teacher.updateMany(
             { teachSubject: { $in: deletedSubjects.map(subject => subject._id) } },
-            { $unset: { teachSubject: "" }, $unset: { teachSubject: null } }
+            { $unset: { teachSubject: "" } }
         );
-
-        // Set examResult and attendance to null in all students
         await Student.updateMany(
             {},
             { $set: { examResult: null, attendance: null } }
         );
 
-        res.send(deletedSubjects);
+        return res.status(200).json(deletedSubjects);
     } catch (error) {
-        res.status(500).json(error);
+        return res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
 
-
-module.exports = { subjectCreate, freeSubjectList, classSubjects, getSubjectDetail, deleteSubjectsByClass, deleteSubjects, deleteSubject, allSubjects };
+module.exports = {
+    subjectCreate,
+    freeSubjectList,
+    classSubjects,
+    getSubjectDetail,
+    deleteSubjectsByClass,
+    deleteSubjects,
+    deleteSubject,
+    allSubjects,
+};
