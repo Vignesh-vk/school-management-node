@@ -24,6 +24,10 @@ mongoose
     .then(console.log("Connected to MongoDB"))
     .catch((err) => console.log("NOT CONNECTED TO NETWORK", err))
 
+app.get('/', (req, res) => {
+    res.send('Welcome to My school management!');
+});
+
 app.use('/', Routes);
 
 app.listen(PORT, () => {
